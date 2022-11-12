@@ -2,87 +2,192 @@ library flutter_redux;
 
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
-import 'package:redux/redux.dart';
+import 'package:flutter/widgets.dart' hide Stack;
 
-/// Provides a Redux [Store] to all descendants of this Widget. This should
-/// generally be a root widget in your App. Connect to the Store provided
-/// by this Widget using a [StoreConnector] or [StoreBuilder].
-class StoreProvider<S> extends InheritedWidget {
-  final Store<S> _store;
+import 'flutter_redux.dart';
 
-  /// Create a [StoreProvider] by passing in the required [store] and [child]
-  /// parameters.
-  const StoreProvider({
+export 'src/store.dart';
+export 'src/utils.dart';
+
+/// A store manager for create、destroy、cache and so on
+class StoreContext {
+  /// last flutter redux observable widget , like StoreConnector or StoreBuilder
+  /// use it for auto subscribe
+  // static Stack<_StoreStreamListenerState> currentBuildContexts = Stack<_StoreStreamListenerState>();
+
+  final Map<String, Store> _cache = {};
+  final Map<Store, String> _keyMap = {};
+
+  ///
+  static late StoreContext instance = StoreContext._();
+
+  StoreContext._();
+
+  ///
+  bool bindStore<S>(Store<S> store, {String? name}) {
+    var key = _getKey(S, name);
+    if (_cache.containsKey(key)) {
+      return false;
+    } else {
+      _cache[key] = store;
+      _keyMap[store] = key;
+      return true;
+    }
+  }
+
+  ///
+  bool unBindStore(Store store) {
+    if (_keyMap.containsKey(store)) {
+      var key = _keyMap[store] as String;
+      _cache.remove(key);
+      _keyMap.remove(store);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  ///
+  Store<S>? find<S>({String? name}) {
+    var key = _getKey(getType(S), name);
+    var store = _cache[key] as Store<S>?;
+    // if (store != null) {
+    //   var context = currentBuildContexts.top;
+    //   context.dependOn(store);
+    //   // (context as StatefulElement).markNeedsBuild();
+    // }
+    return store;
+  }
+
+  ///
+  bool isRegistered<S>({String? name}) => _cache.containsKey(_getKey(S, name));
+
+  /// Generates the key based on [type] (and optionally a [name])
+  /// to register an Instance Builder in the hashmap.
+  String _getKey(Type type, String? name) {
+    return name == null ? type.toString() : type.toString() + name;
+  }
+
+  ///
+  Type getType(Type t) => t;
+
+  ///
+  dynamic broadcast(Store sourceStore, dynamic action) {
+    // middleware consume
+    var list = _cache.values.toList();
+    var index = 0;
+    while (index < list.length) {
+      if (list[index] == sourceStore) {
+        index++;
+        continue;
+      }
+      var isConsume = true;
+      list[index]
+          .createDispatchers((dynamic action) => isConsume = false)[0](action);
+      if (!isConsume && !list[index].reducers.containsKey(action)) {
+        index++;
+        continue;
+      }
+      list[index].dispatch(action);
+      index++;
+    }
+  }
+}
+
+/// 用来往树结构注入T，方便子类获取
+class InheritedProvider<S> extends InheritedWidget {
+  ///
+  const InheritedProvider({
     Key? key,
     required Store<S> store,
     required Widget child,
   })  : _store = store,
         super(key: key, child: child);
 
-  /// A method that can be called by descendant Widgets to retrieve the Store
-  /// from the StoreProvider.
+  //共享状态使用泛型
+  final Store<S> _store;
+
+  @override
+  bool updateShouldNotify(InheritedProvider<S> oldWidget) {
+    return _store != oldWidget._store;
+  }
+}
+
+///
+class StoreProvider<S> extends StatefulWidget {
+  final Widget child;
+  final Store<S> Function() storeBuilder;
+  final bool permanent;
+  final String? tag;
+
   ///
-  /// Important: When using this method, pass through complete type information
-  /// or Flutter will be unable to find the correct StoreProvider!
-  ///
-  /// ### Example
-  ///
-  /// ```
-  /// class MyWidget extends StatelessWidget {
-  ///   @override
-  ///   Widget build(BuildContext context) {
-  ///     final store = StoreProvider.of<int>(context);
-  ///
-  ///     return Text('${store.state}');
-  ///   }
-  /// }
-  /// ```
-  ///
-  /// If you need to use the [Store] from the `initState` function, set the
-  /// [listen] option to false.
-  ///
-  /// ### Example
-  ///
-  /// ```
-  /// class MyWidget extends StatefulWidget {
-  ///   static GlobalKey<_MyWidgetState> captorKey = GlobalKey<_MyWidgetState>();
-  ///
-  ///   MyWidget() : super(key: captorKey);
-  ///
-  ///   _MyWidgetState createState() => _MyWidgetState();
-  /// }
-  ///
-  /// class _MyWidgetState extends State<MyWidget> {
-  ///   Store<String> store;
-  ///
-  ///   @override
-  ///   void initState() {
-  ///     super.initState();
-  ///     store = StoreProvider.of<String>(context, listen: false);
-  ///   }
-  ///
-  ///   @override
-  ///  Widget build(BuildContext context) {
-  ///     return Container();
-  ///   }
-  /// }
-  /// ```
+  const StoreProvider(
+      {Key? key,
+      required this.child,
+      required this.storeBuilder,
+      this.permanent = false,
+      this.tag})
+      : super(key: key);
+
+  @override
+  _StoreProviderState<S> createState() => _StoreProviderState<S>();
+
+  /// 定义一个便捷方法，方便子树中的widget获取共享数据
   static Store<S> of<S>(BuildContext context, {bool listen = true}) {
     final provider = (listen
-        ? context.dependOnInheritedWidgetOfExactType<StoreProvider<S>>()
+        ? context.dependOnInheritedWidgetOfExactType<InheritedProvider<S>>()
         : context
-            .getElementForInheritedWidgetOfExactType<StoreProvider<S>>()
-            ?.widget) as StoreProvider<S>?;
+            .getElementForInheritedWidgetOfExactType<InheritedProvider<S>>()
+            ?.widget) as InheritedProvider<S>?;
 
     if (provider == null) throw StoreProviderError<StoreProvider<S>>();
 
     return provider._store;
   }
+}
+
+class _StoreProviderState<S> extends State<StoreProvider<S>> {
+  late Store<S> _store;
+  bool isStoreCreateBySelf = true;
 
   @override
-  bool updateShouldNotify(StoreProvider<S> oldWidget) =>
-      _store != oldWidget._store;
+  void didUpdateWidget(StoreProvider<S> oldWidget) {
+    if (widget.tag != oldWidget.tag) {
+      StoreContext.instance.unBindStore(_store);
+      StoreContext.instance.bindStore<S>(_store, name: widget.tag);
+    }
+    super.didUpdateWidget(oldWidget);
+  }
+
+  @override
+  void initState() {
+    if (StoreContext.instance.isRegistered<S>(name: widget.tag)) {
+      _store = StoreContext.instance.find<S>(name: widget.tag)!;
+      isStoreCreateBySelf = false;
+    } else {
+      _store = widget.storeBuilder.call();
+      StoreContext.instance.bindStore<S>(_store, name: widget.tag);
+    }
+
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    if (isStoreCreateBySelf && !widget.permanent) {
+      StoreContext.instance.unBindStore(_store);
+      _store.teardown();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InheritedProvider<S>(
+      store: _store,
+      child: widget.child,
+    );
+  }
 }
 
 /// Build a Widget using the [BuildContext] and [ViewModel]. The [ViewModel] is
@@ -511,7 +616,7 @@ class _StoreStreamListenerState<S, ViewModel>
 
   @override
   Widget build(BuildContext context) {
-    return widget.rebuildOnChange
+    var child = widget.rebuildOnChange
         ? StreamBuilder<ViewModel>(
             stream: _stream,
             builder: (context, snapshot) {
@@ -526,6 +631,7 @@ class _StoreStreamListenerState<S, ViewModel>
         : _latestError != null
             ? throw _latestError!
             : widget.builder(context, _requireLatestValue);
+    return child;
   }
 
   bool _whereDistinct(ViewModel vm) {
@@ -600,6 +706,7 @@ class _StoreStreamListenerState<S, ViewModel>
     _latestError = error;
     sink.addError(error, stackTrace);
   }
+
 }
 
 /// If the StoreProvider.of method fails, this error will be thrown.
