@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_redux/flutter_redux.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:redux/redux.dart';
 
 void main() {
   group('StoreProvider', () {
     testWidgets('passes a Redux Store down to its descendants',
         (WidgetTester tester) async {
-      final store = Store<String>(
-        identityReducer,
-        initialState: 'I',
-      );
       final widget = StoreProvider<String>(
-        store: store,
+        storeBuilder: () => Store<String>(
+          {'test': identityReducer},
+          initialState: 'I',
+        ),
         child: StoreCaptor<String>(),
       );
 
@@ -21,7 +19,7 @@ void main() {
       final captor =
           tester.firstWidget<StoreCaptor>(find.byKey(StoreCaptor.captorKey));
 
-      expect(captor.store, store);
+      expect(captor.store, StoreContext.instance.find<String>());
     });
 
     testWidgets('throws a helpful message if no provider found',

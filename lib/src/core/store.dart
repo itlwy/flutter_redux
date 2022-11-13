@@ -1,6 +1,89 @@
 import 'dart:async';
 
-import '../flutter_redux.dart';
+/// A store manager for create、destroy、cache and so on
+class StoreContext {
+  /// last flutter redux observable widget , like StoreConnector or StoreBuilder
+  /// use it for auto subscribe
+  // static Stack<_StoreStreamListenerState> currentBuildContexts = Stack<_StoreStreamListenerState>();
+
+  final Map<String, Store> _cache = {};
+  final Map<Store, String> _keyMap = {};
+
+  ///
+  static late StoreContext instance = StoreContext._();
+
+  StoreContext._();
+
+  ///
+  bool bindStore<S>(Store<S> store, {String? name}) {
+    var key = _getKey(S, name);
+    if (_cache.containsKey(key)) {
+      return false;
+    } else {
+      _cache[key] = store;
+      _keyMap[store] = key;
+      return true;
+    }
+  }
+
+  ///
+  bool unBindStore(Store store) {
+    if (_keyMap.containsKey(store)) {
+      var key = _keyMap[store] as String;
+      _cache.remove(key);
+      _keyMap.remove(store);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  ///
+  Store<S>? find<S>({String? name}) {
+    var key = _getKey(toType(S), name);
+    var store = _cache[key] as Store<S>?;
+    // if (store != null) {
+    //   var context = currentBuildContexts.top;
+    //   context.dependOn(store);
+    //   // (context as StatefulElement).markNeedsBuild();
+    // }
+    return store;
+  }
+
+  ///
+  bool isRegistered<S>({String? name}) => _cache.containsKey(_getKey(S, name));
+
+  /// Generates the key based on [type] (and optionally a [name])
+  /// to register an Instance Builder in the hashmap.
+  String _getKey(Type type, String? name) {
+    return name == null ? type.toString() : type.toString() + name;
+  }
+
+  ///
+  Type toType(Type t) => t;
+
+  ///
+  dynamic broadcast(Store sourceStore, dynamic action) {
+    // middleware consume
+    var list = _cache.values.toList();
+    var index = 0;
+    while (index < list.length) {
+      if (list[index] == sourceStore) {
+        index++;
+        continue;
+      }
+      var isConsume = true;
+      list[index]
+          ._createDispatchers((dynamic action) => isConsume = false)[0](action);
+      if (!isConsume && !list[index].reducers.containsKey(action)) {
+        index++;
+        continue;
+      }
+      list[index].dispatch(action);
+      index++;
+    }
+  }
+}
 
 /// Defines an application's state change
 ///
@@ -159,7 +242,7 @@ typedef NextDispatcher = dynamic Function(dynamic action);
 class Store<State> {
   /// The [Reducer] for your Store. Allows you to get the current reducer or
   /// replace it with a new one if need be.
-  late final Map<String, Reducer<State>> reducers;
+  late final Map<dynamic, Reducer<State>> reducers;
 
   late final StreamController<State> _changeController;
   late State _state;
@@ -198,7 +281,7 @@ class Store<State> {
   }) : _changeController = StreamController.broadcast(sync: syncStream) {
     _state = initialState;
     _middlewares = middlewares;
-    _dispatchers = createDispatchers(
+    _dispatchers = _createDispatchers(
       _createReduceAndNotify(distinct),
     );
   }
@@ -230,7 +313,7 @@ class Store<State> {
   ///     subscription.cancel();
   Stream<State> get onChange => _changeController.stream;
 
-  List<StreamSubscription> _subscriptions = [];
+  final List<StreamSubscription> _subscriptions = const [];
 
   ///
   void connectState<S>(State Function(State thisState, S otherState) convertor,
@@ -240,15 +323,11 @@ class Store<State> {
       return;
     }
     var newState = convertor(state, otherStore.state);
+    _changeState(newState);
 
-    if (distinct && state == _state) return;
-
-    _state = newState;
-    _changeController.add(_state);
     _subscriptions.add(otherStore.onChange.listen((_) {
       var newState = convertor(state, otherStore.state);
-      _state = newState;
-      _changeController.add(_state);
+      _changeState(newState);
     }));
   }
 
@@ -262,18 +341,22 @@ class Store<State> {
       if (reducers.containsKey(action)) {
         final state = reducers[action]!(_state, action);
 
-        if (distinct && state == _state) return;
-
-        _state = state;
-        _changeController.add(state);
+        _changeState(state);
       } else {
         StoreContext.instance.broadcast(this, action);
       }
     };
   }
 
+  void _changeState(State state) {
+    if (distinct && state == _state) return;
+
+    _state = state;
+    _changeController.add(state);
+  }
+
   ///
-  List<NextDispatcher> createDispatchers(
+  List<NextDispatcher> _createDispatchers(
     NextDispatcher reduceAndNotify,
   ) {
     final dispatchers = <NextDispatcher>[]..add(reduceAndNotify);

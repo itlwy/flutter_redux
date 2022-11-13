@@ -1,114 +1,25 @@
 library flutter_redux;
 
 import 'dart:async';
-
 import 'package:flutter/widgets.dart' hide Stack;
-
 import 'flutter_redux.dart';
 
-export 'src/store.dart';
-export 'src/utils.dart';
-
-/// A store manager for create、destroy、cache and so on
-class StoreContext {
-  /// last flutter redux observable widget , like StoreConnector or StoreBuilder
-  /// use it for auto subscribe
-  // static Stack<_StoreStreamListenerState> currentBuildContexts = Stack<_StoreStreamListenerState>();
-
-  final Map<String, Store> _cache = {};
-  final Map<Store, String> _keyMap = {};
-
-  ///
-  static late StoreContext instance = StoreContext._();
-
-  StoreContext._();
-
-  ///
-  bool bindStore<S>(Store<S> store, {String? name}) {
-    var key = _getKey(S, name);
-    if (_cache.containsKey(key)) {
-      return false;
-    } else {
-      _cache[key] = store;
-      _keyMap[store] = key;
-      return true;
-    }
-  }
-
-  ///
-  bool unBindStore(Store store) {
-    if (_keyMap.containsKey(store)) {
-      var key = _keyMap[store] as String;
-      _cache.remove(key);
-      _keyMap.remove(store);
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  ///
-  Store<S>? find<S>({String? name}) {
-    var key = _getKey(getType(S), name);
-    var store = _cache[key] as Store<S>?;
-    // if (store != null) {
-    //   var context = currentBuildContexts.top;
-    //   context.dependOn(store);
-    //   // (context as StatefulElement).markNeedsBuild();
-    // }
-    return store;
-  }
-
-  ///
-  bool isRegistered<S>({String? name}) => _cache.containsKey(_getKey(S, name));
-
-  /// Generates the key based on [type] (and optionally a [name])
-  /// to register an Instance Builder in the hashmap.
-  String _getKey(Type type, String? name) {
-    return name == null ? type.toString() : type.toString() + name;
-  }
-
-  ///
-  Type getType(Type t) => t;
-
-  ///
-  dynamic broadcast(Store sourceStore, dynamic action) {
-    // middleware consume
-    var list = _cache.values.toList();
-    var index = 0;
-    while (index < list.length) {
-      if (list[index] == sourceStore) {
-        index++;
-        continue;
-      }
-      var isConsume = true;
-      list[index]
-          .createDispatchers((dynamic action) => isConsume = false)[0](action);
-      if (!isConsume && !list[index].reducers.containsKey(action)) {
-        index++;
-        continue;
-      }
-      list[index].dispatch(action);
-      index++;
-    }
-  }
-}
+export 'src/core/store.dart';
 
 /// 用来往树结构注入T，方便子类获取
-class InheritedProvider<S> extends InheritedWidget {
+class _InheritedProvider<S> extends InheritedWidget {
   ///
-  const InheritedProvider({
+  const _InheritedProvider({
     Key? key,
     required Store<S> store,
     required Widget child,
   })  : _store = store,
         super(key: key, child: child);
 
-  //共享状态使用泛型
   final Store<S> _store;
 
   @override
-  bool updateShouldNotify(InheritedProvider<S> oldWidget) {
+  bool updateShouldNotify(_InheritedProvider<S> oldWidget) {
     return _store != oldWidget._store;
   }
 }
@@ -135,10 +46,10 @@ class StoreProvider<S> extends StatefulWidget {
   /// 定义一个便捷方法，方便子树中的widget获取共享数据
   static Store<S> of<S>(BuildContext context, {bool listen = true}) {
     final provider = (listen
-        ? context.dependOnInheritedWidgetOfExactType<InheritedProvider<S>>()
+        ? context.dependOnInheritedWidgetOfExactType<_InheritedProvider<S>>()
         : context
-            .getElementForInheritedWidgetOfExactType<InheritedProvider<S>>()
-            ?.widget) as InheritedProvider<S>?;
+            .getElementForInheritedWidgetOfExactType<_InheritedProvider<S>>()
+            ?.widget) as _InheritedProvider<S>?;
 
     if (provider == null) throw StoreProviderError<StoreProvider<S>>();
 
@@ -183,7 +94,7 @@ class _StoreProviderState<S> extends State<StoreProvider<S>> {
 
   @override
   Widget build(BuildContext context) {
-    return InheritedProvider<S>(
+    return _InheritedProvider<S>(
       store: _store,
       child: widget.child,
     );
@@ -706,7 +617,6 @@ class _StoreStreamListenerState<S, ViewModel>
     _latestError = error;
     sink.addError(error, stackTrace);
   }
-
 }
 
 /// If the StoreProvider.of method fails, this error will be thrown.

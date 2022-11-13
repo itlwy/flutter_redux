@@ -1,4 +1,4 @@
-import 'store.dart';
+import 'core/store.dart';
 
 /// A convenience class for binding Reducers to Actions of a given Type. This
 /// allows for type safe [Reducer]s and reduces boilerplate.
